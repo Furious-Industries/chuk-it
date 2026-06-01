@@ -1,0 +1,22 @@
+services:
+  clipstack:
+    build: .
+    container_name: clipstack
+    restart: unless-stopped
+    ports:
+      - "3457:3457"
+    environment:
+      - PORT=3457
+    volumes:
+      # private key/cert stay on the host, mounted read-only — never in an image
+      - ./certs:/app/certs:ro
+    user: "node"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    pids_limit: 100

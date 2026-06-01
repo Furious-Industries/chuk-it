@@ -1,0 +1,9 @@
+node_modules/
+certs/
+.env
+
+# Private/offline notes — never publish
+*.private.md
+npm-debug.log*
+.DS_Store
+.vscode/
