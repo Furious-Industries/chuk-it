@@ -1,7 +1,7 @@
 services:
-  clipstack:
+  chuk-it:
     build: .
-    container_name: clipstack
+    container_name: chuk-it
     restart: unless-stopped
     ports:
       - "3457:3457"

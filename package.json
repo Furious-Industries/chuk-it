@@ -1,5 +1,5 @@
 {
-  "name": "clipstack",
+  "name": "chuk-it",
   "version": "1.0.0",
   "description": "Self-hosted cross-platform clipboard sync",
   "main": "server.js",

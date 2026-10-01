@@ -1,33 +1,42 @@
-# ClipStack
+# Chuk-it
 
-ClipStack is a self-hosted clipboard syncing app for browsers. It keeps a shared history of text clips in memory and broadcasts updates to all connected clients in real time using WebSockets.
+Chuk-it is a self-hosted clipboard tool for browsers across machines on the same network. It keeps a shared list of text clips in memory. It sends each change to all connected browsers immediately through WebSocket connections.
+
+I wanted a quick way to get the contents of my clipboard on one OS device shared neatly across Linux/Windows/MacOS, without resorting to logging into gmail on three machines, and using a draft email as a lazy clipboard.
+
+It has a simple UI to capture the clipboard and 'chuk-it' over to the other machines on the network. It's viewable as a served page in the browser and holds a rolling memory of clips (which can be searched/deleted/recaptured).
+
+It is text only as it's mainly used for transporting code, commands, URLs, certs, IDs, etc.
+
+> ⚠️ **Use Chuk-it only on a network that you trust.**
+> Chuk-it has no authentication. Any person who can connect to the port can read, add, and delete every clip on every connected device. Do not open the port to the internet. Do not put Chuk-it behind a public reverse proxy. Keep Chuk-it on your local area network (LAN), or connect to it through a virtual private network (VPN).
 
 ## Features
 
-- Add text clips from any connected browser
-- Real-time sync across all connected clients
-- Search recent clips in the sidebar
-- View and copy full clip content
-- Delete individual clips or clear the full history
-- Secure HTTPS + WebSocket transport
+- Add text clips from any connected browser.
+- The server sends each new clip to all browsers immediately.
+- Search the recent clips in the sidebar.
+- Show and copy the full text of a clip.
+- Delete one clip, or delete all clips.
+- HTTPS and secure WebSocket connections protect the transport.
 
 ## Files
 
-- `server.js` - HTTPS server and WebSocket backend
-- `public/index.html` - browser UI with embedded CSS and client logic
-- `Dockerfile` - container build configuration
-- `docker-compose.yml` - service definition for local deployment
-- `package.json` - Node metadata and dependency on `ws`
-- `certs/` - SSL certificate and key for HTTPS (do not commit private keys; this folder should be ignored by Git)
-- `ARCHITECTURE.md` - specification and architecture document
+- `server.js` — the HTTPS server and the WebSocket server.
+- `public/index.html` — the browser interface, with its CSS and client code.
+- `Dockerfile` — the container build file.
+- `docker-compose.yml` — the service definition for local use.
+- `package.json` — the Node metadata and the dependency on `ws`.
+- `certs/` — the TLS certificate and key for HTTPS. Do not commit the private key. Git ignores this directory.
+- `ARCHITECTURE.md` — the architecture and behavior document.
 
-## Certificates and network requirements
+## Certificate and network requirements
 
-ClipStack requires HTTPS because the browser clipboard API and secure WebSocket transport depend on a secure context. Do not push your own private key or cert files to the repository. Instead, generate your own self-signed certs for testing or use a reverse proxy with valid certificates in production or, you can just click past the warnings the browsers and it will work just fine...
+Chuk-it must use HTTPS. The browser clipboard interface and the secure WebSocket connection need a secure context. Do not commit your private key or certificate to the repository. Make a self-signed certificate for a test. Use a reverse proxy with a valid certificate for production.
 
-### Generating local test certificates
+### Make a test certificate
 
-For a local development setup, create a `certs/` folder and generate a self-signed certificate with OpenSSL:
+Make the `certs/` directory. Then make a self-signed certificate with OpenSSL:
 
 ```bash
 mkdir -p certs
@@ -35,18 +44,22 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/key.pem -out certs/cert.
   -subj "/CN=localhost"
 ```
 
-Then start the app and open `https://localhost:3457/`.
+Then start Chuk-it and open `https://localhost:3457/`.
 
-The app serves both the web UI and WebSocket endpoint from the same origin, so standard CORS headers are not needed for the default setup. If you host the UI and WS endpoint separately, ensure the WebSocket connection uses the correct `wss://` origin or proxy configuration.
+**The browser shows a security warning the first time.** The certificate is self-signed. The browser shows "Your connection is not private" (`NET::ERR_CERT_AUTHORITY_INVALID`). This is normal. Open **Advanced** and continue to the site. You do this one time on each device.
 
-## Run Locally
+**Chuk-it needs a certificate and a key to start.** Chuk-it reads `certs/key.pem` and `certs/cert.pem` at start. If a file is absent, Chuk-it shows an error that names the file, and stops. Make the certificate first.
 
-### Prerequisites
+Chuk-it serves the interface and the WebSocket connection from the same origin. So the default setup does not need cross-origin resource sharing (CORS) headers. If you serve the interface and the WebSocket connection from different origins, use the correct `wss://` origin or proxy configuration.
 
-- Node.js 20+ or Docker
-- SSL certs present in `certs/key.pem` and `certs/cert.pem`
+## Run Chuk-it
 
-### Using Node
+### Requirements
+
+- Node.js 20 or later, or Docker.
+- A TLS certificate in `certs/cert.pem` and a key in `certs/key.pem`.
+
+### Run with Node
 
 ```bash
 npm install
@@ -55,16 +68,16 @@ npm start
 
 Then open `https://localhost:3457/`.
 
-### Using Docker
+### Run with Docker
 
 ```bash
-docker build -t clipstack .
-docker run -p 3457:3457 -v "$PWD/certs:/app/certs:ro" --name clipstack clipstack
+docker build -t chuk-it .
+docker run -p 3457:3457 -v "$PWD/certs:/app/certs:ro" --name chuk-it chuk-it
 ```
 
-Certs are mounted at runtime rather than baked into the image, so the private key never rocks up in an image layer.
+Docker mounts the certificate at run time. It does not copy the certificate into the image. So the private key is never in an image layer.
 
-### Using Docker Compose
+### Run with Docker Compose
 
 ```bash
 docker compose up --build
@@ -72,21 +85,26 @@ docker compose up --build
 
 ## Notes
 
-- Clip history is stored only in memory and is lost on server restart.
-- No authentication is configured.
-- HTTPS is required for clipboard features and secure WebSocket connections.
-- The app is built for same-origin deployment: the page and WebSocket server should be reached from the same host and port when possible.
+- Chuk-it keeps the clip list in memory only. It loses the list when it stops.
+- Chuk-it has no authentication. This is a design choice for a trusted-network tool. Read the warning at the top of this file. Do not open Chuk-it to the internet. There is a small chance a madman (or fleet of agents) can find it and make off with your juicy clipboard contents. You have been warned.
+- Each message has a limit of 512 KB so nothing explodes.
+- The clip list has a total size limit of 16 MB.
+- The server prunes the oldest clips first when the size limit is hit.
+- Chuk-it needs HTTPS for the clipboard functions and the secure WebSocket connection, and to feel instant.
+- Serve the interface and the WebSocket server from the same host and port when possible.
 
-## Contributing
+## Contribute
 
-Feel free to fork and experiment, it does what I needed it to, so this is it.
+You can fork the project and experiment. It does what I needed it to, so this is it.
 
-Good improvements include:
+Good additions might include:
+
 - persistent storage for clips
-- authentication or access controls
-- support for binary clipboard formats
-- improved WebSocket error handling
+- authentication or access control
+- support for binary clipboard data
+- better WebSocket error handling
+- pretty colours
 
 ---
 
-For a more detailed architecture and behaviour description, see `ARCHITECTURE.md`.
+For more detail about the architecture and the behaviour, read `ARCHITECTURE.md`.

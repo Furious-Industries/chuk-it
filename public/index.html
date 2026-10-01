@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ClipStack</title>
+<title>Chuk-it</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500&display=swap');
-
+  /* Fonts come from the system font stack below. Chuk-it loads no external resources, so it works
+     fully offline on a trusted LAN and does not report its use to any third party. */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
@@ -442,7 +442,7 @@
     <div class="sidebar-header">
       <div class="logo">
         <div class="logo-icon">📋</div>
-        <div class="logo-text">ClipStack</div>
+        <div class="logo-text">Chuk-it</div>
       </div>
       <div class="search-wrap">
         <span class="search-icon">⌕</span>
@@ -466,7 +466,7 @@
   <div class="main">
     <div class="main-header">
       <div class="main-title" id="main-title">
-        <span>ClipStack</span> — select a clip or paste new content
+        <span>Chuk-it</span> — select a clip or paste new content
       </div>
       <div class="header-actions">
         <button class="btn" id="copy-btn" style="display:none">Copy to clipboard</button>
@@ -485,7 +485,7 @@
 
       <div class="input-area">
         <div class="input-row">
-          <textarea class="paste-box" id="paste-box" placeholder="Paste or type something to add to ClipStack… (Ctrl+Enter to send)"></textarea>
+          <textarea class="paste-box" id="paste-box" placeholder="Paste or type something to add to Chuk-it… (Ctrl+Enter to send)"></textarea>
           <button class="send-btn" id="send-btn">Add clip</button>
         </div>
         <div class="input-hint" id="input-hint">Ctrl+Enter to send &nbsp;·&nbsp; All connected browsers see new clips instantly</div>
@@ -506,6 +506,12 @@
   let searchQLower = '';
   let maxItems = 200;
   let reconnectTimer = null;
+
+  // The server rejects any WebSocket frame over 512KB. Measure the ACTUAL frame the client sends
+  // (the JSON, with escaping), not the raw text — JSON escaping of quotes or control characters can
+  // make the frame much larger than the text. This stops a paste that looks small but sends large.
+  const MAX_FRAME_BYTES = 512 * 1024;
+  const byteLen = (s) => new TextEncoder().encode(s).length;
 
   function getSource() {
     try { const p = navigator.userAgentData?.platform; if (p) return p; } catch (_) {}
@@ -557,7 +563,10 @@
       }
 
       if (msg.type === 'add') {
-        clips = clips.filter(c => c.id !== msg.clip.id);
+        // Dedupe by text as well as id, to match the server. The server evicts an older clip that
+        // has the same text and gives the new clip a new id, so a filter on id alone would keep the
+        // stale copy and show the clip twice.
+        clips = clips.filter(c => c.id !== msg.clip.id && c.text !== msg.clip.text);
         clips.unshift(msg.clip);
         if (clips.length > maxItems) clips.length = maxItems;
         renderList();
@@ -588,7 +597,12 @@
 
   // ── Render sidebar list ──
   function escapeHtml(s) {
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // Escapes for BOTH text and quoted-attribute contexts. The quote escaping is load-bearing:
+    // clip text is interpolated into title="…" in renderList(), so an unescaped " would break out
+    // of the attribute and let a clip inject markup/handlers that run on every connected browser.
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
   function highlight(text, q) {
@@ -663,7 +677,7 @@
       viewerLabel.textContent = 'Nothing selected';
       charCount.textContent = '';
       copyBtn.style.display = 'none';
-      mainTitle.innerHTML = '<span>ClipStack</span> — select a clip or paste new content';
+      mainTitle.innerHTML = '<span>Chuk-it</span> — select a clip or paste new content';
       return;
     }
 
@@ -706,7 +720,17 @@
   function addClip() {
     const text = pasteBox.value.trim();
     if (!text) return;
-    send({ type: 'add', text, source: getSource() });
+    const frame = JSON.stringify({ type: 'add', text, source: getSource() });
+    if (byteLen(frame) > MAX_FRAME_BYTES) {
+      showToast(`Too large to sync — reduce the clip below ${Math.floor(MAX_FRAME_BYTES / 1024)} KB`);
+      return;
+    }
+    if (!ws || ws.readyState !== 1) {
+      showToast('Not connected — wait a moment and try again');
+      return;
+    }
+    // Clear the input and confirm success only after the frame is really sent within the size limit.
+    ws.send(frame);
     pasteBox.value = '';
     sendBtn.disabled = true;
     showToast('Clip added');
