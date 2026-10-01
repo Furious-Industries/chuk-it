@@ -23,7 +23,7 @@ ClipStack is a self-hosted clipboard syncing app for browsers. It keeps a shared
 
 ## Certificates and network requirements
 
-ClipStack requires HTTPS because the browser clipboard API and secure WebSocket transport depend on a secure context. Do not push your own private key or cert files to the repository. Instead, generate your own self-signed certs for testing or use a reverse proxy with valid certificates in production.
+ClipStack requires HTTPS because the browser clipboard API and secure WebSocket transport depend on a secure context. Do not push your own private key or cert files to the repository. Instead, generate your own self-signed certs for testing or use a reverse proxy with valid certificates in production or, you can just click past the warnings the browsers and it will work just fine...
 
 ### Generating local test certificates
 
@@ -62,7 +62,7 @@ docker build -t clipstack .
 docker run -p 3457:3457 -v "$PWD/certs:/app/certs:ro" --name clipstack clipstack
 ```
 
-Certs are mounted at runtime rather than baked into the image, so the private key never ends up in an image layer.
+Certs are mounted at runtime rather than baked into the image, so the private key never rocks up in an image layer.
 
 ### Using Docker Compose
 
@@ -72,15 +72,16 @@ docker compose up --build
 
 ## Notes
 
-- Clip history is stored only in memory and is lost on restart.
+- Clip history is stored only in memory and is lost on server restart.
 - No authentication is configured.
 - HTTPS is required for clipboard features and secure WebSocket connections.
 - The app is built for same-origin deployment: the page and WebSocket server should be reached from the same host and port when possible.
 
 ## Contributing
 
-Feel free to fork and experiment. Good improvements include:
+Feel free to fork and experiment, it does what I needed it to, so this is it.
 
+Good improvements include:
 - persistent storage for clips
 - authentication or access controls
 - support for binary clipboard formats
@@ -88,4 +89,4 @@ Feel free to fork and experiment. Good improvements include:
 
 ---
 
-For a more detailed architecture and behavior description, see `ARCHITECTURE.md`.
+For a more detailed architecture and behaviour description, see `ARCHITECTURE.md`.
