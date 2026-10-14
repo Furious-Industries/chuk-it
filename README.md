@@ -214,3 +214,5 @@ Read [SECURITY-REVIEW.md](SECURITY-REVIEW.md) for the OWASP review and test limi
 ## Author and license
 
 Stu maintains Chuk-it. See [LICENSE.md](LICENSE.md) for the existing MIT license.
+
+Chuk-it is feature-complete and no longer actively maintained. It does what it was built to do. Issues and pull requests may not get a response, and security fixes are not guaranteed. If you find an issue, fork it and fix it freely under the MIT license.
