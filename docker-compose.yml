@@ -4,16 +4,17 @@ services:
     container_name: chuk-it
     restart: unless-stopped
     ports:
-      - "3457:3457"
+      - "${BIND_ADDRESS:?Set BIND_ADDRESS to your chosen LAN or VPN IPv4 address}:3457:3457"
     environment:
-      - PORT=3457
+      PORT: "3457"
+      BIND_ADDRESS: "0.0.0.0"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?Set the exact HTTPS origins that you use}"
     volumes:
-      # private key/cert stay on the host, mounted read-only — never in an image
       - ./certs:/app/certs:ro
     user: "node"
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=16m,noexec,nosuid,nodev
     security_opt:
       - no-new-privileges:true
     cap_drop:

@@ -1,0 +1,15 @@
+# Replace these example names and addresses before you make the certificate.
+[req]
+prompt = no
+distinguished_name = dn
+req_extensions = server_ext
+[dn]
+CN = chuk-it.home.arpa
+[server_ext]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @names
+[names]
+DNS.1 = chuk-it.home.arpa
+IP.1 = 192.168.1.50

@@ -4,9 +4,15 @@
   "description": "Self-hosted cross-platform clipboard sync",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node tests/browser.cjs"
   },
   "dependencies": {
-    "ws": "^8.18.0"
-  }
+    "ws": "8.22.0"
+  },
+  "engines": {
+    "node": ">=24.21.0 <25"
+  },
+  "license": "MIT"
 }

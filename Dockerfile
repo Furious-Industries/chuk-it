@@ -1,10 +1,9 @@
-FROM node:20-alpine
+FROM node:24.21.0-alpine
 WORKDIR /app
-COPY package.json .
-RUN npm install --omit=dev --no-audit --no-fund
-COPY server.js .
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
+COPY server.js LICENSE.md ./
 COPY public/ public/
-# certs are mounted read-only at runtime, never baked into the image
 EXPOSE 3457
 USER node
 CMD ["node", "server.js"]

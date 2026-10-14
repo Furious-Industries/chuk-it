@@ -1,16 +1,9 @@
-# Keep secrets and local junk out of the build context / image layers
-certs/
-.env
-*.private.md
-node_modules/
-npm-debug.log*
-.git/
-.gitignore
-.DS_Store
-.vscode/
-README.md
-ARCHITECTURE.md
-LICENSE*
-docker-compose.yml
-Dockerfile
-.dockerignore
+# Only these files can enter the build context.
+**
+!package.json
+!package-lock.json
+!server.js
+!public/
+!public/**
+!LICENSE.md
+!Dockerfile

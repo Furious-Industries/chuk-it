@@ -1,193 +1,149 @@
-# Chuk-it — Architecture &amp; Specification
+# Chuk-it architecture
 
-## Overview
+## Components
 
-Chuk-it is a self-hosted, browser-based clipboard stack and sync app. It provides a simple HTTPS web UI and WebSocket backend to capture clipboard text entries, maintain a shared history of recent clips, and deliver real-time updates to all connected browsers.
+| File | Function |
+| --- | --- |
+| `server.js` | HTTPS, connection checks, shared history, and WebSocket messages. |
+| `public/index.html` | Page structure. |
+| `public/app.js` | Browser state, delivery checks, and clipboard actions. |
+| `public/styles.css` | Desktop and mobile styles. |
+| `package-lock.json` | Exact dependency version and package integrity value. |
+| `config/` | Example certificate configuration. |
+| `tests/` | Local server and browser tests. |
 
-The application consists of:
-- `server.js`: Node.js HTTPS server + WebSocket broadcast backend
-- `public/index.html`: single-page UI with embedded CSS and JavaScript
-- `Dockerfile`: container image build for production deployment
-- `docker-compose.yml`: optional service orchestration for local deployment
-- `certs/` - SSL certificate and key used for HTTPS (should not be committed; add to `.gitignore`)
+The application has one Node.js process. It has no database, external API, analytics, or remote fonts.
+The browser loads all application resources from the Chuk-it server.
 
-## SSL certificate handling
+## Trust boundary
 
-The application requires TLS for the HTTPS server and secure WebSocket endpoint. The certificates in `certs/` are for local use only and should never be published in a public repository. Generate your own self-signed certificates for testing or use a managed TLS certificate through a reverse proxy.
+The network controls access. Every reachable native client can claim an approved origin and obtain the shared history.
+Origin checks protect the browser boundary. They do not provide authentication.
+Do not use the server as a public service.
 
-### Local test certificate generation
+The server requires an exact configured HTTPS origin and Host header. Both must name the same host and port.
+Only `GET /ws` can start a WebSocket connection. The server does not accept forwarded client-address headers.
+Rate limits use the socket's remote address. A proxy or NAT can cause several devices to share one limit.
 
-Create a `certs/` directory and generate a self-signed certificate with OpenSSL:
+## HTTPS
 
-```bash
-mkdir -p certs
-openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/key.pem -out certs/cert.pem -days 365 \
-  -subj "/CN=localhost"
-```
+The server supports TLS 1.2 and TLS 1.3. It restricts TLS 1.2 to ECDHE and AES-GCM cipher suites.
+Only `/`, `/app.js`, and `/styles.css` serve files. The server accepts GET and HEAD for these routes.
+Unknown routes return 404. Other methods return 405. An unlisted Host returns 403.
+Certificate files, source files, and repository metadata have no HTTP route.
 
-Use these certs only locally. For production, place the TLS terminator in front of the Node.js app and do not check private key material into Git.
+Responses use `no-store`, `nosniff`, HSTS, a referrer policy, and a Content Security Policy (CSP).
+The CSP blocks inline scripts, inline styles, object content, framing, and unlisted connections.
+Cross-Origin-Opener-Policy separates this page from unrelated opener windows.
 
-## Goals
+## Shared history
 
-- Allow users to paste text into a shared clip history
-- Keep a list of recent clips available to all connected clients
-- Support add, delete, and clear operations across clients in real time
-- Persist state only in memory for the current server process
+Each clip contains `id`, `text`, `preview`, `ts`, and `source`.
+Clip IDs are random UUIDs. Each server start also creates a new session UUID.
+The session UUID identifies a running instance. It is not a login token.
 
-## Architecture
+The server uses whitespace checks only to reject empty text. It stores the supplied text without trimming it.
+An identical text value replaces its earlier clip. One event contains the replacement and all removed IDs.
+The browser transfers selection only when the replacement has exactly the selected text.
 
-### HTTP server
+The history limit includes JSON escaping and metadata. The server removes the oldest clips first.
+A deleted or evicted selection becomes empty. A disconnected browser removes its old history view.
+A new connection receives the current snapshot. A server restart cannot reuse an earlier clip ID.
 
-`server.js` creates an HTTPS server using Node's built-in `https` module.
+Data remains in memory only. The application does not write clips to files, browser storage, or logs.
+This does not guarantee physical erasure from RAM, swap, crash dumps, or an operating-system clipboard.
 
-- Serves a single route: `GET /`, which returns `public/index.html` as the web UI
-- Returns `404` for every other path
-- Adds security headers to every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and `Strict-Transport-Security`
-- Uses certificates from `certs/key.pem` and `certs/cert.pem`. If either file cannot be read, the server prints a clear error that points to the README and exits, instead of crashing with a stack trace
-- Listens on port `3457` by default or from `process.env.PORT`
+## Message protocol
 
-### WebSocket server
+The server sends `init` after an approved connection. It contains the session UUID, history, item limit, message limit, and retry duration.
 
-A `ws` WebSocket server runs on top of the HTTPS server.
+Every mutation contains these fields:
 
-- Any connected browser receives an `init` message containing:
-  - current `clips` array
-  - `maxItems` limit (200)
-- Clients can send messages to:
-  - add a clip: `{ type: 'add', text, source }`
-  - delete a clip: `{ type: 'delete', id }`
-  - clear all clips: `{ type: 'clear' }`
-- Broadcasts the following events to all clients:
-  - `add` with clip metadata
-  - `delete` with clip id (also sent for each clip the server evicts to stay within its limits)
-  - `clear` when history is wiped
-- Rejects any frame over 512 KB (`maxPayload`). The connection's `error` handler logs this and closes that one socket, so an oversized paste cannot crash the server
-- Error handlers on the WebSocket server and the HTTPS server keep the process alive when a single connection fails
-- Before each send, checks the client's outgoing buffer. If more than 8 MB is waiting, the client is not reading its socket, so the server terminates that connection instead of buffering more data
+| Field | Value |
+| --- | --- |
+| `type` | `add`, `delete`, or `clear`. |
+| `requestId` | A new UUID for the action. Keep this UUID for retries. |
+| `session` | The session UUID from `init`. |
+| `createdAt` | The original request time in milliseconds since the Unix epoch. |
 
-### In-memory state
+`add` also requires string fields `text` and `source`.
+`delete` also requires a clip UUID in `id`. `clear` requires no additional field.
+The server rejects unknown fields, wrong types, empty text, invalid UUIDs, binary messages, and malformed JSON.
+The source label has a 40-character limit. It cannot contain ASCII control characters.
 
-The server maintains three runtime variables:
-- `clips`: array of clip objects
-- `nextId`: integer used to generate unique clip IDs
-- `storeBytes`: running total of the bytes of clip text held in memory
+The server sends `add`, `delete`, or `clear` events to connected clients.
+It sends an `ack` with the request ID after acceptance. An add acknowledgement also contains the new clip ID.
+An error contains a fixed error code. It does not contain clip text or a stack trace.
 
-Clip object shape:
-- `id`: numeric unique identifier
-- `text`: full clip text
-- `preview`: first 80 characters, with ellipsis if truncated
-- `ts`: timestamp in milliseconds
-- `source`: client source string, default `unknown`, cut to 40 characters
-- `bytes`: size of `text` in bytes; kept on the server only and never sent to clients
+## Delivery and retry
 
-Behavior rules:
-- New clip text is trimmed and ignored if empty
-- Duplicate text values are deduplicated by removing existing items with identical `text`
-- New clips are inserted at the front of the `clips` array
-- `source` is treated as untrusted: anything other than a string becomes `unknown`
-- `clips` is capped at `MAX_ITEMS` (200) and at `MAX_STORE_BYTES` (16 MB of clip text in total). When either limit is exceeded, the oldest clips are evicted and a `delete` is broadcast for each one
-- A `delete` with an id that is not an integer is ignored
+The browser keeps the draft until it receives the matching acknowledgement.
+If the user edits the draft meanwhile, the acknowledgement does not clear the new text.
+After five seconds without confirmation, the browser offers a retry. It does not retry automatically.
 
-### Client UI
+The server keeps a fingerprint and acknowledgement for each accepted request for ten minutes from its creation time.
+An identical retry receives the original acknowledgement. It does not cause another mutation.
+A changed payload with the same request ID causes an error.
+The server rejects expired requests. It rejects requests created more than 30 seconds in the future.
 
-`public/index.html` is a complete single-page application with style and behavior embedded in one file.
+The receipt store holds at most 2,048 entries. At capacity, the server rejects new mutations until entries expire.
+It keeps earlier receipts for their full retry window.
+A restart clears receipts and history. Its new session ID prevents automatic replay of an earlier action.
 
-Main UI areas:
-- Sidebar with search and clip list
-- Main viewer with selected clip preview
-- Input area for adding new clips
-- Status footer showing connection state
+An acknowledgement confirms acceptance at that time. It does not mean that a clip still exists after another client deletes it.
+Delete and clear actions also receive acknowledgements. The interface updates their results from server events; it does not retry them automatically.
 
-Key client behaviors:
-- Connects to the server on page load, selecting `wss://` over HTTPS (the intended deployment) or `ws://` otherwise, based on `location.protocol`
-- Receives `init` and renders the existing clip list
-- Receives `add`, `delete`, and `clear` messages and updates the UI live
-- Sends `add` messages when user pastes text and clicks the button or presses Ctrl+Enter (Cmd+Enter on macOS)
-- Before sending, measures the full JSON frame. If it is over 512 KB, shows a "Too large to sync" toast and keeps the text. If the connection is down, shows a "Not connected" toast and keeps the text. The input is cleared only after the frame is sent
-- On `add`, removes any existing clip with the same id or the same text, to match the server's deduplication
-- Sends `delete` when removing a clip from the sidebar
-- Sends `clear` when clearing all clips after user confirmation
-- Automatically attempts reconnect every 2.5 seconds when connection drops
+## Resource limits
 
-### UI details
+| Resource | Limit or behavior |
+| --- | --- |
+| Stored clips | 200. |
+| Stored clip JSON | 16 MiB, including escaping and metadata. |
+| Incoming message | 512 KiB, including the JSON envelope. |
+| Fragment count | 1,024 per message. |
+| Buffered input chunks | 1,024 per connection. |
+| Raw TCP connections | 64. |
+| WebSocket connections | 32 total; 16 per remote address. |
+| Upgrade attempts | 60 per minute per address. |
+| Incoming events | 120 per minute per connection; 300 per minute per address. |
+| Incoming bytes | 16 MiB per minute per address. |
+| Address records | 1,024. Unused records expire after one minute. |
+| Outgoing data | 20 MiB per client; 64 MiB across clients. |
+| Heartbeat | Ping every 30 seconds. Disconnect if the next check finds no pong. |
+| TLS handshake | 10 seconds. |
+| HTTP headers and request | 10-second timeouts; Node checks these periodically. |
+| Socket inactivity | 15 seconds before upgrade. |
+| HTTP keep-alive | 5 seconds. |
+| HTTP headers | 8 KiB. |
 
-- Search filters clips by substring match on clip text
-- Selection highlights the active clip and displays full text in the viewer
-- Copy button copies the selected clip text to the clipboard
-- Clear all button removes every clip from server state and all clients
-- The UI uses a dark theme with custom styling and responsive layout
-- Fonts come from the system font stack. The page loads no external resources, so it works offline on a LAN and makes no third-party requests
-- All clip text is HTML-escaped, including `"` and `'`, before it is placed in markup or in the `title` attribute, so a clip cannot inject markup into other browsers
+Rate limits use token buckets. A new bucket permits one minute's allocation as a burst, then refills continuously.
+Ping and pong events also use the event limit. Compression is disabled.
+The next outgoing payload counts towards the buffer limit before transmission. Slow clients lose their connection.
+The browser tries a new connection after 2.5 seconds. It loads a fresh snapshot after approval.
 
-## Deployment
+These controls limit application resources. They cannot stop network saturation or guarantee availability against every reachable client.
 
-### Docker
+## Logs
 
-`Dockerfile` builds the app as a Node.js container:
-- Base image: `node:20-alpine`
-- Copies `package.json`, installs production dependencies
-- Copies `server.js` and `public/` only
-- Does not copy `certs/`. The certificate and key are mounted read-only at run time, so the private key is never in an image layer. `.dockerignore` also excludes `certs/`, `.env`, and private notes from the build context
-- Exposes port `3457`
-- Runs as the unprivileged `node` user
-- Runs `node server.js`
+Startup and server errors use fixed messages. Security events use aggregate counts, at most once per heartbeat.
+Each summary has a UTC time. Counts cover rejected upgrades, rate limits, invalid messages, protocol errors, and slow readers.
+The server does not log origins, IP addresses, request IDs, source labels, or clipboard contents.
+Node writes logs to standard output or standard error. The operator controls any Docker or service log retention.
 
-### Docker Compose
+## Technical terms
 
-`docker-compose.yml` defines a single service:
-- Service name: `chuk-it`
-- Container name: `chuk-it`
-- Builds from the local directory
-- Restarts unless stopped
-- Maps host port `3457` to container port `3457`
-- Exports `PORT=3457`
-- Mounts `./certs` at `/app/certs` read-only
-- Hardens the container:
-  - runs as the `node` user
-  - read-only root filesystem, with a `tmpfs` at `/tmp`
-  - `no-new-privileges`
-  - drops all Linux capabilities (`cap_drop: ALL`)
-  - limits memory to 256 MB and processes to 100
-
-## Security and limitations
-
-- HTTPS is mandatory because the UI uses secure context features such as `clipboard.writeText` and `WebSocket` over secure transport.
-- Certificates are loaded from `certs/key.pem` and `certs/cert.pem`; these must exist and be valid.
-- Do not commit `certs/` or private key material to Git. Use `.gitignore` to exclude this folder from version control.
-- No authentication or access control is implemented.
-- All data is stored only in memory; restarting the server clears the clip history.
-- There is no persistence layer or database.
-- Text entries are deduplicated only by exact `text` equality.
-- Maximum message payload is set to 512 KB in the WebSocket server. The client checks the same limit before it sends.
-- Total clip text in memory is capped at 16 MB; the oldest clips are evicted first.
-- Clients that stop reading their socket are disconnected once 8 MB is waiting for them.
-- The default app design uses a same-origin page and WebSocket connection, so it avoids typical CORS requirements. If you split the UI and backend across domains, ensure the WS origin and proxy settings are configured correctly.
-
-## Runtime flow
-
-1. Server starts and reads SSL certs
-2. User opens `https://<host>:3457/`
-3. Browser loads `index.html`
-4. Client opens a WebSocket connection to the same host
-5. Server sends current clip history via `init`
-6. User adds a clip
-7. Client sends `{ type: 'add', text, source }`
-8. Server validates text, creates clip object, updates `clips`, and broadcasts `add`
-9. All connected clients receive the clip and refresh their clip list
-10. User selects, copies, deletes, or clears clips, and the server broadcasts changes to everyone
-
-## File summary
-
-- `server.js` - HTTPS/websocket backend and in-memory clip store
-- `public/index.html` - browser UI, styling, and WebSocket client logic
-- `Dockerfile` - container build definition
-- `docker-compose.yml` - simple service orchestration
-- `package.json` - app metadata and dependency on `ws`
-
-## Notes for maintainers
-
-- To adjust history size, change `MAX_ITEMS` and `MAX_STORE_BYTES` in `server.js`
-- If you change `MAX_MSG_BYTES` in `server.js`, change `MAX_FRAME_BYTES` in `public/index.html` to match
-- To support non-HTTPS local development, the client WebSocket logic would need to be adapted and the app would lose clipboard write support in insecure contexts
-- The server does not sanitize clip text; the UI escapes it before rendering. Keep using `escapeHtml()` for any new place that puts clip text into markup
-- Adding persistence would require replacing the `clips` in-memory array with a storage layer
+| Term | Meaning |
+| --- | --- |
+| Clip | One shared text entry. |
+| Origin | A scheme, hostname or IP address, and port. |
+| WebSocket | A connection that carries messages in both directions. |
+| Acknowledgement | A server message that confirms an accepted request. |
+| Receipt | The stored fingerprint and acknowledgement for a request. |
+| UUID | A randomly generated identifier. |
+| Token bucket | A counter that refills over time and limits traffic. |
+| SAN | A certificate field that lists valid hostnames and IP addresses. |
+| CA | A certificate authority that signs certificates. |
+| CSP | A browser policy that restricts content and connections. |
+| LAN | A local area network. |
+| VPN | A private network connection through another network. |
+| KiB / MiB | 1,024 bytes / 1,048,576 bytes. |

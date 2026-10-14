@@ -1,0 +1,10 @@
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = ca_ext
+[dn]
+CN = Chuk-it local CA
+[ca_ext]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash

@@ -7,3 +7,7 @@ certs/
 npm-debug.log*
 .DS_Store
 .vscode/
+
+# Local test certificates, browser profiles, runtimes, and evidence.
+artifacts/
+local-ca/
